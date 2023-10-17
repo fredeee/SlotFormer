@@ -418,7 +418,7 @@ class StoSAVi(BaseModel):
     def _reset_rnn(self):
         self.predictor.reset()
 
-    def forward(self, data_dict):
+    def forward(self, data_dict, get_rawmasks = False):
         """A wrapper for model forward.
 
         If the input video is too long in testing, we manually cut it.
@@ -426,13 +426,13 @@ class StoSAVi(BaseModel):
         img = data_dict['img']
         T = img.shape[1]
         if T <= self.clip_len or self.training:
-            return self._forward(img, None)
+            return self._forward(img, None, get_rawmasks=get_rawmasks)
 
         # try to find the max len to input each time
         clip_len = T
         while True:
             try:
-                _ = self._forward(img[:, :clip_len], None)
+                _ = self._forward(img[:, :clip_len], None, get_rawmasks=get_rawmasks)
                 del _
                 torch.cuda.empty_cache()
                 break
@@ -442,14 +442,14 @@ class StoSAVi(BaseModel):
         self.clip_len = max(self.clip_len, clip_len)
         # no need to split
         if clip_len == T:
-            return self._forward(img, None)
+            return self._forward(img, None, get_rawmasks=get_rawmasks)
 
         # split along temporal dim
         cat_dict = None
         prev_slots = None
         for clip_idx in range(0, T, clip_len):
             out_dict = self._forward(img[:, clip_idx:clip_idx + clip_len],
-                                     prev_slots)
+                                     prev_slots, get_rawmasks=get_rawmasks)
             # because this should be in test mode, we detach the outputs
             if cat_dict is None:
                 cat_dict = {k: [v.detach()] for k, v in out_dict.items()}
@@ -462,7 +462,7 @@ class StoSAVi(BaseModel):
         cat_dict = {k: torch_cat(v, dim=1) for k, v in cat_dict.items()}
         return cat_dict
 
-    def _forward(self, img, prev_slots=None):
+    def _forward(self, img, prev_slots=None, blackout_p = 0.0, get_rawmasks = False):
         """Forward function.
 
         Args:
@@ -475,8 +475,13 @@ class StoSAVi(BaseModel):
             self._reset_rnn()
 
         B, T = img.shape[:2]
+        if blackout_p > 0:
+            drop_mask = (torch.rand((B, T-3, 1, 1, 1), device=img.device) > blackout_p).float()
+            drop_mask = torch.cat((torch.ones((B, 3, 1, 1, 1), device=img.device), drop_mask), dim=1)
+            img = img * drop_mask
+
         kernel_dist, post_slots, encoder_out = \
-            self.encode(img, prev_slots=prev_slots)
+            self.encode(img_input, prev_slots=prev_slots)
         # `slots` has shape: [B, T, self.num_slots, self.slot_size]
 
         out_dict = {
@@ -488,20 +493,28 @@ class StoSAVi(BaseModel):
             return out_dict
 
         if self.use_post_recon_loss:
-            post_recon_img, post_recons, post_masks, _ = \
-                self.decode(post_slots.flatten(0, 1))
-            post_dict = {
-                'post_recon_combined': post_recon_img,  # [B*T, 3, H, W]
-                'post_recons': post_recons,  # [B*T, num_slots, 3, H, W]
-                'post_masks': post_masks,  # [B*T, num_slots, 1, H, W]
-            }
+            if get_rawmasks:
+                post_recon_img, post_recons, post_masks, rawmasks  = self.decode(post_slots.flatten(0, 1), get_rawmasks=True)
+                post_dict = {
+                    'post_recon_combined': post_recon_img,  # [B*T, 3, H, W]
+                    'post_recons': post_recons,  # [B*T, num_slots, 3, H, W]
+                    'post_masks': post_masks,  # [B*T, num_slots, 1, H, W]
+                    'raw_masks': rawmasks,  # [B*T, num_slots, 1, H, W]
+                }
+            else:
+                post_recon_img, post_recons, post_masks, _ = self.decode(post_slots.flatten(0, 1))
+                post_dict = {
+                    'post_recon_combined': post_recon_img,  # [B*T, 3, H, W]
+                    'post_recons': post_recons,  # [B*T, num_slots, 3, H, W]
+                    'post_masks': post_masks,  # [B*T, num_slots, 1, H, W]
+                }
             out_dict.update(
                 {k: v.unflatten(0, (B, T))
                  for k, v in post_dict.items()})
 
         return out_dict
 
-    def decode(self, slots):
+    def decode(self, slots, get_rawmasks = False):
         """Decode from slots to reconstructed images and masks."""
         # `slots` has shape: [B, self.num_slots, self.slot_size].
         bs, num_slots, slot_size = slots.shape
@@ -520,8 +533,11 @@ class StoSAVi(BaseModel):
         out = out.view(bs, num_slots, num_channels + 1, height, width)
         recons = out[:, :, :num_channels, :, :]  # [B, num_slots, 3, H, W]
         masks = out[:, :, -1:, :, :]
+        rawmasks = masks.clone()
         masks = F.softmax(masks, dim=1)  # [B, num_slots, 1, H, W]
         recon_combined = torch.sum(recons * masks, dim=1)  # [B, 3, H, W]
+        if get_rawmasks:
+            return recon_combined, recons, masks, rawmasks
         return recon_combined, recons, masks, slots
 
     def calc_train_loss(self, data_dict, out_dict):

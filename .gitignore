@@ -11,6 +11,9 @@ checkpoint/
 checkpoints/
 .idea/
 
+*.mp4
+/std
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

@@ -6,7 +6,7 @@ class SlotFormerParams(BaseParams):
 
     # training settings
     gpus = 4  # 2 GPUs should also be good
-    max_epochs = 12  # 230k steps
+    max_epochs = 24  # 230k steps
     save_interval = 0.2  # save every 0.2 epoch
     save_epoch_end = True  # save ckp at the end of every epoch
     n_samples = 5  # visualization after each epoch
@@ -19,10 +19,10 @@ class SlotFormerParams(BaseParams):
     warmup_steps_pct = 0.025  # warmup in the first 2.5% of total steps
 
     # data settings
-    dataset = 'clevrer'
-    data_root = './data/CLEVRER'
-    n_sample_frames = 6  # train on video clips of 6 frames
-    frame_offset = 2 #1  # no offset
+    dataset = 'adept' #'clevrer'
+    data_root = './data/ADEPT' # './data/CLEVRER'
+    n_sample_frames = 10 #63  # train on video clips of 6 frames
+    frame_offset = 3  # no offset
     filter_enter = False  # no need to filter videos when training SAVi
     train_batch_size = 64 // gpus
     val_batch_size = train_batch_size * 2
@@ -30,7 +30,7 @@ class SlotFormerParams(BaseParams):
 
     # model configs
     model = 'StoSAVi'  # stochastic version of SAVi
-    resolution = (64, 64)
+    resolution = (64,64)
     input_frames = n_sample_frames
 
     # Slot Attention
@@ -53,7 +53,7 @@ class SlotFormerParams(BaseParams):
     # CNN Decoder
     dec_dict = dict(
         dec_channels=(128, 64, 64, 64, 64),
-        dec_resolution=(8, 8),
+        dec_resolution=(8, 8), # (8,8)
         dec_ks=5,
         dec_norm='',
     )
