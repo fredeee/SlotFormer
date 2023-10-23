@@ -481,7 +481,7 @@ class StoSAVi(BaseModel):
             img = img * drop_mask
 
         kernel_dist, post_slots, encoder_out = \
-            self.encode(img_input, prev_slots=prev_slots)
+            self.encode(img, prev_slots=prev_slots)
         # `slots` has shape: [B, T, self.num_slots, self.slot_size]
 
         out_dict = {

@@ -77,7 +77,7 @@ def _save_video(videos, video_fn, dim=3):
     save_video(video, save_path, fps=4)
 
 
-def test_blackout(model):
+def test_blackout(model, path_statistics):
     model.eval()
     torch.cuda.empty_cache()
     loss_fn_vgg = lpips.LPIPS(net='vgg').cuda()
@@ -108,6 +108,7 @@ def test_blackout(model):
             # set every 4th frame to 1
             for i in range(0, blackout_mask_orig.shape[1], 4):
                 blackout_mask_orig[:, i] = 1
+
         zero_mask = torch.zeros((B,6)).float()
         blackout_mask = torch.cat((zero_mask, blackout_mask_orig), dim=1).to(gt.device)
         data_dict['img'] = data_dict['img'] * (1-blackout_mask[:, :, None, None, None])
@@ -163,22 +164,13 @@ def test_blackout(model):
             print(f'{key} blackout average: {average_dic[key + "blackout_average"]:.4f} +/- {average_dic[key + "blackout_std"]:.4f}')
             print(f'{key} visible average: {average_dic[key + "visible_average"]:.4f} +/- {average_dic[key + "visible_std"]:.4f}')
 
-    with open(os.path.join(f'statistics', f'{evaluation_mode}_metric_complete.pkl'), 'wb') as f:
+    path_statistics = os.path.join(path_statistics, 'statistics')
+    if not os.path.exists(path_statistics):
+        os.makedirs(path_statistics)
+    with open(os.path.join(path_statistics, f'{evaluation_mode}_metric_complete.pkl'), 'wb') as f:
         pickle.dump(metric_complete, f)
-    with open(os.path.join(f'statistics', f'{evaluation_mode}_metric_average.pkl'), 'wb') as f:
+    with open(os.path.join(path_statistics, f'{evaluation_mode}_metric_average.pkl'), 'wb') as f:
         pickle.dump(average_dic, f)
-
-def main():
-    params.ddp = False
-    params.n_sample_frames = 42 + 6
-    params.input_frames = 6
-    params.val_batch_size = 4
-    model = build_model(params)
-    model.load_state_dict(
-        torch.load(args.weight, map_location='cpu')['state_dict'])
-    model = torch.nn.DataParallel(model).cuda().eval()
-
-    test_blackout(model)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Extract slots from videos')
@@ -189,7 +181,7 @@ if __name__ == "__main__":
     parser.add_argument(
         '--save_path',
         type=str,
-        required=True,  # './data/CLEVRER/slots.pkl'
+        required=False,  # './data/CLEVRER/slots.pkl'
         help='path to save slots',
     )
     args = parser.parse_args()
@@ -201,7 +193,17 @@ if __name__ == "__main__":
     params = params.SlotFormerParams()
     if 'physion' in args.params:
         params.dataset = f'physion_{args.subset}'
-    assert params.dataset in args.save_path
-
+    #assert params.dataset in args.save_path
     torch.backends.cudnn.benchmark = True
-    main()
+
+    # Custom
+    params.ddp = False
+    params.n_sample_frames = 42 + 6
+    params.input_frames = 6
+    params.val_batch_size = 4
+    model = build_model(params)
+    model.load_state_dict(
+        torch.load(args.weight, map_location='cpu')['state_dict'])
+    model = torch.nn.DataParallel(model).cuda().eval()
+
+    test_blackout(model, args.save_path)
